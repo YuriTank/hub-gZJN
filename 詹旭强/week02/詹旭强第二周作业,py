@@ -1,0 +1,168 @@
+import random
+import torch
+import torch.nn as nn
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+
+"""
+
+基于pytorch框架编写模型训练
+实现一个自行构造的找规律(机器学习)任务
+规律：x是一个5维向量，预测该向量的最大值的索引数。
+
+"""
+
+class ZxqTorchModel(nn.Module):
+
+
+
+    def __init__(self,inputSize):
+        super(ZxqTorchModel, self).__init__()
+        # 使用多层感知机 (MLP) 结构，增加非线性能力
+        self.net = nn.Sequential(
+            nn.Linear(inputSize, 64), # 隐藏层
+            nn.ReLU(),                # 激活函数
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, 5)          # 输出层
+        )
+        self.lossfun = nn.CrossEntropyLoss()
+
+
+    def forward(self ,x,y=None):
+        x = self.net(x)
+        #修改前 x = self.linear(x)  # (batch_size, input_size) -> (batch_size, 1)
+        #修改前 y_pred = self.activefun(x)  # (batch_size, 1) -> (batch_size, 1)
+
+        if y is not None:
+            # 修改前 return self.lossfun(y_pred, y)  
+            return self.lossfun(x, y)  # 预测值和真实值计算损失
+        else:
+            #修改前return y_pred  # 输出预测结果
+            return x  
+
+    #以前的初始化函数
+    def init_ole(self,inputSize):
+        super(ZxqTorchModel,self).__init__() #执行父类的初始化方法
+        self.linear = nn.Linear(inputSize,3) #线性层输入五维、输出3维
+        # 修改前self.activefun = nn.Sigmoid() #引入非线性 采用SiGMOD
+        #修改前  self.lossfun = nn.functional.cross_entropy #损失函数采用交叉熵  
+        self.lossfun = nn.CrossEntropyLoss()
+        # 当输入真实标签，返回loss值；无真实标签，返回预测值
+
+        
+def generate_samples(n):
+    """
+    生成包含随机整数数组及其最大值下标的样本数据。
+
+    参数:
+        n (int): 需要生成的样本数量（正整数）。
+
+    返回:
+        list: 包含 n 个元组的列表。
+              每个元组格式为: (长度为5的随机整数数组, 最大值的下标)
+    """
+    samples = []
+    
+    # 假设随机整数的范围是 0 到 100 (可以根据需要修改)
+    # 一次性生成所有数据：(n, 5) 形状的二维数组
+    random_data = np.random.randint(0, 101, size=(n, 5))
+    
+    # 沿着 axis=1 (行方向) 寻找最大值的索引
+    max_indices = np.argmax(random_data, axis=1)
+    
+    # 将数据组装成要求的元组列表
+    for i in range(n):
+        # 这里将 numpy 数组转为 list 以便更符合常规 Python 数据结构，
+        # 如果你需要保持 numpy 数组格式，可以去掉 .tolist()
+        samples.append((random_data[i].tolist(), int(max_indices[i])))
+        
+    return samples
+
+
+
+
+def prict():
+    print("-----------------开始预测")
+    #测试数据
+    test_vec = []
+
+    reslist = generate_samples(10)
+
+    for item in reslist:
+        test_vec.append(item[0])
+
+    input_size = 5
+    model = ZxqTorchModel(input_size)
+    model.load_state_dict(torch.load("zxqzymodel.bin"))  # 加载训练好的权重
+    #print(model.state_dict())
+
+    model.eval()  # 测试模式
+    with torch.no_grad():  # 不计算梯度
+        result = model.forward(torch.FloatTensor(test_vec))  # 模型预测
+        _, predicted_class = torch.max(result, dim=1) 
+    for vec, res in zip(test_vec, predicted_class):
+        # 修改前print("输入：%s, 预测类别：%d, 概率值：%f" % (vec, round(float(res)), res))  # 打印结果
+        print(f"输入：{vec}, 预测类别：{res.item()+1}")
+
+
+        
+def main():
+
+    # 配置参数
+    epoch_num = 200  # 训练轮数
+    batch_size = 30  # 每次训练样本个数
+    train_sample = 20000  # 每轮训练总共训练的样本总数
+    input_size = 5  # 输入向量维度
+    learning_rate = 0.01  # 学习率
+    #建立模型
+    zxqmd = ZxqTorchModel(input_size)
+    #选择优化器
+    optim = torch.optim.Adam(zxqmd.parameters(), lr=learning_rate)
+
+
+    #生成随机样本以及对应标签
+    trainsmp = generate_samples(train_sample)
+    # 简单统计验证
+    counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0}
+    for t in trainsmp:
+        counts[t[1]] += 1
+    #print(f"\n分布统计: 0(降序): {counts[0]}, 1(升序): {counts[1]}, 2(其他): {counts[2]}")
+
+
+
+    for epoch in range(epoch_num):
+        zxqmd.train()
+        lossvalue = 0
+        for batch in range(train_sample // batch_size):
+            x = []
+            y = []
+            for item in trainsmp[batch*batch_size:(batch+1)*batch_size]:
+                #修改前 x.append(np.asarray(item[0]))  
+                x.append(item[0])
+                y.append(item[1]) #<websource>source_group_web_2</websource>
+
+                # 修改前 y.append([item[1]])  
+
+            x = torch.FloatTensor(x)  # 修改前 x = torch.IntTensor(x)
+            y = torch.LongTensor(y)   # 修改前 y = torch.IntTensor(y)
+
+            lossvalue = zxqmd(x,y) # 计算损失值
+            lossvalue.backward()  # 计算梯度
+            optim.step()  # 更新权重
+            optim.zero_grad()  # 梯度归零
+            lossvalue += lossvalue.item() #累加损失值 
+
+        print(f"当前第{epoch}轮，损失值为：{(lossvalue / (train_sample // batch_size)):.4f}")
+        #print(f"当前第{epoch}轮，损失值为：{lossvalue}")
+
+    torch.save(zxqmd.state_dict(), "zxqzymodel.bin") # 保存模型
+
+
+
+main()
+
+
+prict()

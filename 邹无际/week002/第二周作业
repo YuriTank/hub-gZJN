@@ -1,0 +1,135 @@
+import os
+
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+
+import torch
+import torch.nn as nn
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+"""一个随机向量，哪一维数字最大就属于第几类。"""
+
+
+class TorchModel(nn.Module):
+    def __init__(self, input_size, output_size):
+        super(TorchModel, self).__init__()
+        self.linear = nn.Linear(input_size, output_size)  # 线性层
+        self.loss = nn.CrossEntropyLoss()  # 交叉熵损失函数
+
+    def forward(self, x, y=None):
+        logits = self.linear(x)  # (batch_size, input_size) -> (batch_size, output_size)
+
+        if y is not None:
+            return self.loss(logits, y)
+        else:
+            return logits
+
+def build_sample():
+
+    x = np.random.random(5)
+    label = np.argmax(x)
+    print("特征：", x, "标签：", label)
+    return x, label
+
+def build_dataset(total_sample_num):
+    X = []
+    Y = []
+    for i in range(total_sample_num):
+
+        x, y = build_sample()
+        X.append(x)
+        Y.append(y)
+    return torch.FloatTensor(X), torch.LongTensor(Y)
+
+
+
+def evaluate(model):
+
+    model.eval()
+    test_sample_num = 100
+    x, y = build_dataset(test_sample_num)
+
+    correct = 0
+
+    with torch.no_grad():
+
+        logits = model(x)  # 模型预测 model.forward(x)
+        y_pred = torch.argmax(logits, dim=1)
+        correct = (y_pred == y).sum().item()
+
+    # 计算准确率
+    accuracy = correct / test_sample_num
+
+    print("正确预测个数：%d, 正确率：%f" % (correct, accuracy))
+    return accuracy
+
+
+
+def main():
+    epoch_num = 20  # 训练轮数：整个训练集要被完整遍历20次
+    batch_size = 20  # 批次大小：每次从训练集中取出20个样本进行一轮权重更新
+    train_sample = 5000  # 每轮训练使用的样本总数：共5000个训练样本
+    input_size = 5  # 输入向量维度：每个样本是5维向量
+    output_size = 5  # 输出类别数：5个类别（标签0-4）
+    learning_rate = 0.01  # 学习率：控制每次权重更新的步长，太大可能震荡，太小收敛慢
+
+    model = TorchModel(input_size, output_size)
+    optim = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    log = []
+
+    train_x, train_y = build_dataset(train_sample)
+
+    for epoch in range(epoch_num):
+        model.train()
+        watch_loss = []
+        for batch_index in range(train_sample // batch_size):
+            x = train_x[batch_index * batch_size: (batch_index + 1) * batch_size]
+            y = train_y[batch_index * batch_size: (batch_index + 1) * batch_size]
+            loss = model(x, y)  # 计算loss  model.forward(x,y)
+            loss.backward()  # 计算梯度
+            optim.step()  # 更新权重
+            optim.zero_grad()  # 梯度归零
+            watch_loss.append(loss.item())
+        print("=========\n第%d轮平均loss:%f" % (epoch + 1, np.mean(watch_loss)))
+        acc = evaluate(model)  # 测试本轮模型结果
+        log.append([acc, float(np.mean(watch_loss))])
+    torch.save(model.state_dict(), "model.bin")
+    print(log)
+    plt.plot(range(len(log)), [l[0] for l in log], label="acc")  # 画acc曲线
+    plt.plot(range(len(log)), [l[1] for l in log], label="loss")  # 画loss曲线
+
+    plt.legend()
+    plt.show()
+    return
+
+
+def predict(model_path, input_vec):
+
+    input_size = 5
+    output_size = 5
+
+    model = TorchModel(input_size, output_size)
+
+    model.load_state_dict(torch.load(model_path))  # 加载训练好的权重
+    print(model.state_dict())
+
+    model.eval()  # 测试模式
+
+    with torch.no_grad():  # 不计算梯度
+        logits = model.forward(torch.FloatTensor(input_vec))  # 模型预测
+        predictions = torch.argmax(logits, dim=1)
+        probabilities = torch.softmax(logits, dim=1)
+
+    for vec, pred, prob in zip(input_vec, predictions, probabilities):
+        print("输入：%s, 预测类别：%d, 概率分布：%s" % (vec, int(pred), prob.numpy()))  # 打印结果
+
+
+if __name__ == "__main__":
+    main()
+
+    test_vec = [[0.2, 0.8, 0.3, 0.1, 0.5],  # 第2维最大，应为类别1
+                [0.9, 0.3, 0.5, 0.2, 0.1],  # 第1维最大，应为类别0
+                [0.1, 0.2, 0.3, 0.9, 0.4],  # 第4维最大，应为类别3
+                [1, 0.1, 0.2, 0.4, 0.8]]  # 第5维最大，应为类别4
+    predict("model.bin", test_vec)

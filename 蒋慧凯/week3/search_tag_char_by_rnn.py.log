@@ -1,0 +1,41 @@
+2026-04-26 18:52:47.646 | DEBUG    | __main__:train:142 - 开始训练
+2026-04-26 18:52:48.010 | DEBUG    | __main__:train:157 - [epoch]:0 [loss]:2.33 [train_acc]:0.47 [valid_acc]:0.49
+2026-04-26 18:52:54.780 | DEBUG    | __main__:train:157 - [epoch]:20 [loss]:0.93 [train_acc]:0.70 [valid_acc]:0.70
+2026-04-26 18:53:01.290 | DEBUG    | __main__:train:157 - [epoch]:40 [loss]:0.69 [train_acc]:0.77 [valid_acc]:0.75
+2026-04-26 18:53:07.813 | DEBUG    | __main__:train:157 - [epoch]:60 [loss]:0.47 [train_acc]:0.88 [valid_acc]:0.89
+2026-04-26 18:53:14.460 | DEBUG    | __main__:train:157 - [epoch]:80 [loss]:0.49 [train_acc]:0.88 [valid_acc]:0.76
+2026-04-26 18:53:20.803 | DEBUG    | __main__:train:157 - [epoch]:100 [loss]:0.38 [train_acc]:0.90 [valid_acc]:0.91
+2026-04-26 18:53:27.253 | DEBUG    | __main__:train:157 - [epoch]:120 [loss]:0.33 [train_acc]:0.92 [valid_acc]:0.93
+2026-04-26 18:53:33.739 | DEBUG    | __main__:train:157 - [epoch]:140 [loss]:0.29 [train_acc]:0.94 [valid_acc]:0.96
+2026-04-26 18:53:40.237 | DEBUG    | __main__:train:157 - [epoch]:160 [loss]:0.27 [train_acc]:0.95 [valid_acc]:0.96
+2026-04-26 18:53:46.817 | DEBUG    | __main__:train:157 - [epoch]:180 [loss]:0.26 [train_acc]:0.95 [valid_acc]:0.98
+2026-04-26 18:53:53.271 | DEBUG    | __main__:train:157 - [epoch]:200 [loss]:0.23 [train_acc]:0.97 [valid_acc]:0.97
+2026-04-26 18:53:59.761 | DEBUG    | __main__:train:157 - [epoch]:220 [loss]:0.20 [train_acc]:0.96 [valid_acc]:0.98
+2026-04-26 18:54:06.217 | DEBUG    | __main__:train:157 - [epoch]:240 [loss]:0.17 [train_acc]:0.97 [valid_acc]:1.00
+2026-04-26 18:54:12.671 | DEBUG    | __main__:train:157 - [epoch]:260 [loss]:0.14 [train_acc]:0.98 [valid_acc]:1.00
+2026-04-26 18:54:19.111 | DEBUG    | __main__:train:157 - [epoch]:280 [loss]:0.13 [train_acc]:0.98 [valid_acc]:1.00
+2026-04-26 18:54:25.259 | DEBUG    | __main__:train:160 - 训练结束
+2026-04-26 18:54:25.259 | DEBUG    | __main__:test:178 - 开始评估
+2026-04-26 18:54:25.262 | DEBUG    | __main__:test:181 - [测试集] 准确率:0.98
+2026-04-26 18:54:25.262 | DEBUG    | __main__:test:185 - [样例展示(10)]
+2026-04-26 18:54:25.262 | DEBUG    | __main__:test:197 - WfSFlEPhnUJg7慧GZGtgL [是否含有特殊字符]:True [预测位置]:14 [对应字符]:慧  [是否正确]:True
+2026-04-26 18:54:25.263 | DEBUG    | __main__:test:198 - ----------
+2026-04-26 18:54:25.263 | DEBUG    | __main__:test:197 - ZtSdOrEf7EE慧vwh45LUu [是否含有特殊字符]:True [预测位置]:12 [对应字符]:慧  [是否正确]:True
+2026-04-26 18:54:25.263 | DEBUG    | __main__:test:198 - ----------
+2026-04-26 18:54:25.263 | DEBUG    | __main__:test:197 - np7vERTkjOJWZlI7K8gj [是否含有特殊字符]:False [预测位置]:0 [对应字符]:None  [是否正确]:False
+2026-04-26 18:54:25.263 | DEBUG    | __main__:test:198 - ----------
+2026-04-26 18:54:25.263 | DEBUG    | __main__:test:197 - mC9KnNfl1EbpTKDT2bsQ [是否含有特殊字符]:False [预测位置]:0 [对应字符]:None  [是否正确]:False
+2026-04-26 18:54:25.263 | DEBUG    | __main__:test:198 - ----------
+2026-04-26 18:54:25.263 | DEBUG    | __main__:test:197 - 2icoDp45kjDhnk7yWF7慧 [是否含有特殊字符]:True [预测位置]:20 [对应字符]:慧  [是否正确]:True
+2026-04-26 18:54:25.263 | DEBUG    | __main__:test:198 - ----------
+2026-04-26 18:54:25.264 | DEBUG    | __main__:test:197 - ODe9Du9Erm2Hj1XEken慧 [是否含有特殊字符]:True [预测位置]:0 [对应字符]:None  [是否正确]:False
+2026-04-26 18:54:25.264 | DEBUG    | __main__:test:198 - ----------
+2026-04-26 18:54:25.264 | DEBUG    | __main__:test:197 - zhA4PfAvI7sVrnXVxB9b [是否含有特殊字符]:False [预测位置]:0 [对应字符]:None  [是否正确]:False
+2026-04-26 18:54:25.264 | DEBUG    | __main__:test:198 - ----------
+2026-04-26 18:54:25.264 | DEBUG    | __main__:test:197 - bsZTn3fIEpNaAGmP慧FqM [是否含有特殊字符]:True [预测位置]:17 [对应字符]:慧  [是否正确]:True
+2026-04-26 18:54:25.264 | DEBUG    | __main__:test:198 - ----------
+2026-04-26 18:54:25.264 | DEBUG    | __main__:test:197 - CffhWDJMF1sio0VizuCA [是否含有特殊字符]:False [预测位置]:0 [对应字符]:None  [是否正确]:False
+2026-04-26 18:54:25.264 | DEBUG    | __main__:test:198 - ----------
+2026-04-26 18:54:25.265 | DEBUG    | __main__:test:197 - 5Q7YFdjhoXzwX46iwvbo [是否含有特殊字符]:False [预测位置]:0 [对应字符]:None  [是否正确]:False
+2026-04-26 18:54:25.265 | DEBUG    | __main__:test:198 - ----------
+2026-04-26 18:54:25.265 | DEBUG    | __main__:test:200 - 评估结束

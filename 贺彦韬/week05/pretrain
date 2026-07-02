@@ -1,0 +1,395 @@
+"""
+字符级 Transformer 语言模型
+将 week4 的 RNN/LSTM 语言模型与单头自注意力升级为多头注意力 Transformer 结构。
+
+用法:
+    python week5.py --epochs 20 --num_heads 4 --num_layers 2
+"""
+import time
+import math
+import argparse
+import glob
+import random
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
+
+
+# ─────────────────────────── 数据 ───────────────────────────
+
+def load_corpus(pattern="*.txt"):
+    """读取所有匹配的.txt文件，拼成一个超长字符串"""
+    texts = []
+    for path in glob.glob(pattern):
+        with open(path, encoding="utf-8", errors="ignore") as f:
+            texts.append(f.read())
+    return "".join(texts)
+
+
+def build_vocab(text):
+    """
+    建立字符词表：找出文本里所有不重复的字符，分配一个编号
+    char2idx: 字符 → 数字  {"我":0, "爱":1, ...}
+    idx2char: 数字 → 字符  {0:"我", 1:"爱", ...}
+    """
+    chars = sorted(set(text))                          # 去重+排序，保证每次顺序一致
+    char2idx = {c: i for i, c in enumerate(chars)}    # 字符转数字
+    idx2char = {i: c for c, i in char2idx.items()}    # 数字转字符（推理时用）
+    return char2idx, idx2char
+
+
+class CharDataset(Dataset):
+    """
+    滑动窗口数据集：把超长文本切成一个个训练样本
+    例如文本"今天天气很好"，seq_len=4：
+      x=[今,天,天,气]  y=[天,天,气,很]
+      x=[天,天,气,很]  y=[天,气,很,好]
+    每次向右滑动一格，x是输入，y是对应的下一个字（标签）
+    """
+
+    def __init__(self, text, char2idx, seq_len):
+        self.seq_len = seq_len
+        # 把文本里每个字符转成对应的数字id，存成一条超长序列
+        ids = [char2idx[c] for c in text if c in char2idx]
+        self.data = torch.tensor(ids, dtype=torch.long)
+
+    def __len__(self):
+        # 能切出多少个样本：总长度 - seq_len
+        # max(0,...)防止语料太短时返回负数
+        return max(0, len(self.data) - self.seq_len)
+
+    def __getitem__(self, idx):
+        # x：从idx开始取seq_len个字符作为输入
+        x = self.data[idx: idx + self.seq_len]
+        # y：从idx+1开始取seq_len个字符作为标签（整体错位一格）
+        y = self.data[idx + 1: idx + self.seq_len + 1]
+        return x, y
+
+
+# ─────────────────────────── 模型 ───────────────────────────
+
+class MultiHeadSelfAttention(nn.Module):
+    """
+    多头自注意力：把输入拆成多个头，每个头独立学习不同的注意力模式
+    比单头注意力能捕捉更多维度的语言关系
+    """
+
+    def __init__(self, hidden_size, num_heads):
+        super().__init__()
+        # hidden_size必须能被num_heads整除，才能平均分配给每个头
+        assert hidden_size % num_heads == 0, "hidden_size 必须能被 num_heads 整除"
+        self.num_heads = num_heads
+        self.head_dim = hidden_size // num_heads   # 每个头分到的维度
+
+        # Q/K/V三个线性变换，把输入映射到查询/键/值空间
+        self.q_linear = nn.Linear(hidden_size, hidden_size)  # 问：我在找什么
+        self.k_linear = nn.Linear(hidden_size, hidden_size)  # 答：我能提供什么
+        self.v_linear = nn.Linear(hidden_size, hidden_size)  # 内容：我实际的信息
+        self.out_proj  = nn.Linear(hidden_size, hidden_size) # 把多头结果合并回原始维度
+
+    def forward(self, x, mask=None):
+        # x形状: (batch_size, seq_len, hidden_size)
+        B, T, H = x.shape
+
+        # 计算Q/K/V，形状都是(B, T, H)
+        Q = self.q_linear(x)
+        K = self.k_linear(x)
+        V = self.v_linear(x)
+
+        # 拆分多头：把H维度拆成num_heads个head_dim
+        # (B, T, H) → (B, T, num_heads, head_dim) → (B, num_heads, T, head_dim)
+        Q = Q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        K = K.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        V = V.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+
+        # 计算注意力分数：Q和K做点积，除以√head_dim防止值太大导致softmax饱和
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)
+
+        if mask is not None:
+            # 因果掩码：把未来位置（mask=0的地方）填成-inf
+            # softmax(-inf)=0，等于完全忽略未来的字
+            scores = scores.masked_fill(mask == 0, float("-inf"))
+
+        # softmax把分数变成概率分布（每行加和为1）
+        attn_weights = torch.softmax(scores, dim=-1)
+
+        # 用注意力权重对V加权求和，得到每个位置的输出
+        out = torch.matmul(attn_weights, V)           # (B, num_heads, T, head_dim)
+
+        # 合并多头：把num_heads个head_dim拼回H
+        # (B, num_heads, T, head_dim) → (B, T, H)
+        out = out.transpose(1, 2).contiguous().view(B, T, H)
+
+        # 最后再过一个线性层，混合多头的信息
+        return self.out_proj(out)
+
+
+class TransformerLayer(nn.Module):
+    """
+    单层Transformer块：
+    多头注意力 → 残差+LayerNorm → 前馈网络 → 残差+LayerNorm
+    """
+
+    def __init__(self, hidden_size, num_heads, ff_size, dropout):
+        super().__init__()
+        self.attention = MultiHeadSelfAttention(hidden_size, num_heads)
+        self.norm1 = nn.LayerNorm(hidden_size)   # 第一个归一化层
+        self.norm2 = nn.LayerNorm(hidden_size)   # 第二个归一化层
+        self.ffn = nn.Sequential(
+            nn.Linear(hidden_size, ff_size),     # 升维：128 → 512
+            nn.GELU(),                           # 激活函数，比ReLU更平滑
+            nn.Linear(ff_size, hidden_size),     # 降维：512 → 128
+        )
+        self.drop = nn.Dropout(dropout)          # 随机丢弃防止过拟合
+
+    def forward(self, x, mask=None):
+        # 1. 多头自注意力
+        attn_out = self.drop(self.attention(x, mask))
+        # 残差连接（x + attn_out）：把原始输入加回来，防止梯度消失
+        # LayerNorm：对每个样本的特征做归一化，稳定训练
+        x = self.norm1(x + attn_out)
+
+        # 2. 前馈网络（每个位置独立处理）
+        ff_out = self.drop(self.ffn(x))
+        # 同样加残差连接和LayerNorm
+        x = self.norm2(x + ff_out)
+        return x
+
+
+class PositionalEncoding(nn.Module):
+    """
+    正弦余弦位置编码：给每个位置加上独特的位置信息
+    因为Transformer一次看所有字，不像RNN天生知道顺序
+    所以要手动告诉模型每个字在第几个位置
+    """
+
+    def __init__(self, hidden_size, max_len=1024, dropout=0.1):
+        super().__init__()
+        self.drop = nn.Dropout(dropout)
+
+        # 预先算好所有位置的编码，存起来备用
+        pe  = torch.zeros(max_len, hidden_size)
+        pos = torch.arange(0, max_len).unsqueeze(1).float()   # 位置编号 0,1,2,...
+        # 不同维度用不同频率的sin/cos，让每个位置的编码都唯一
+        div = torch.exp(
+            torch.arange(0, hidden_size, 2).float() * (-math.log(10000.0) / hidden_size)
+        )
+        pe[:, 0::2] = torch.sin(pos * div)   # 偶数维度用sin
+        pe[:, 1::2] = torch.cos(pos * div)   # 奇数维度用cos
+
+        # register_buffer：把pe存入模型但不作为训练参数（不更新梯度）
+        self.register_buffer("pe", pe.unsqueeze(0))   # (1, max_len, H)
+
+    def forward(self, x):
+        # 把位置编码加到词向量上：字义信息 + 位置信息
+        x = x + self.pe[:, : x.size(1)]
+        return self.drop(x)
+
+
+class TransformerLM(nn.Module):
+    """
+    完整的字符级Transformer语言模型
+    输入：字符id序列
+    输出：每个位置预测下一个字的概率分布
+    """
+
+    def __init__(self, vocab_size, embed_dim, num_heads, num_layers, ff_size, dropout, max_len=1024):
+        super().__init__()
+        # Embedding：把字符id转成稠密向量（词表大小 → embed_dim维）
+        self.embed   = nn.Embedding(vocab_size, embed_dim)
+        # 位置编码：加入位置信息
+        self.pos_enc = PositionalEncoding(embed_dim, max_len, dropout)
+        # 堆叠多个TransformerLayer，层数越多模型越深
+        self.layers  = nn.ModuleList([
+            TransformerLayer(embed_dim, num_heads, ff_size, dropout)
+            for _ in range(num_layers)
+        ])
+        self.drop = nn.Dropout(dropout)
+        # 最后的线性层：把hidden_size维映射回词表大小，输出每个字的分数
+        self.fc   = nn.Linear(embed_dim, vocab_size)
+
+    def forward(self, x):
+        B, T = x.shape
+        # 构造因果掩码：下三角矩阵，1表示可以看，0表示不能看
+        # 防止模型在训练时"偷看"未来的字
+        mask = torch.tril(torch.ones(T, T, device=x.device)).unsqueeze(0).unsqueeze(0)
+
+        # 字符id → 词向量 → 加位置编码
+        h = self.pos_enc(self.embed(x))   # (B, T, embed_dim)
+
+        # 依次通过每一层Transformer
+        for layer in self.layers:
+            h = layer(h, mask)
+
+        # 输出每个位置对应词表的分数（logits），还没过softmax
+        logits = self.fc(h)               # (B, T, vocab_size)
+        return logits
+
+
+# ─────────────────────────── 训练 / 评估 ───────────────────────────
+
+def run_epoch(model, loader, criterion, optimizer, device, train=True, desc=""):
+    t_start = time.perf_counter()
+    total_samples = 0
+    model.train(train)   # train=True开启dropout，train=False关闭dropout
+    total_loss   = 0.0
+    total_tokens = 0
+
+    pbar = tqdm(loader, desc=desc, leave=False, dynamic_ncols=True)
+    for x, y in pbar:
+        # 把数据搬到GPU，non_blocking=True允许异步传输，不阻塞CPU
+        x, y   = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+
+        # 前向传播：输入x，得到每个位置的预测分数
+        logits = model(x)   # (B, T, vocab_size)
+
+        # 计算loss：把logits和y都拉平成一维再计算
+        # logits: (B*T, vocab_size)  y: (B*T,)
+        loss   = criterion(logits.reshape(-1, logits.size(-1)), y.reshape(-1))
+
+        if train:
+            optimizer.zero_grad()    # 清空上一步的梯度
+            loss.backward()          # 反向传播：计算每个参数的梯度
+            # 梯度裁剪：把梯度限制在1.0以内，防止梯度爆炸导致训练崩溃
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()         # 更新参数：按梯度方向调整权重
+
+        # 累计loss（乘以token数是为了后面算平均）
+        total_loss   += loss.item() * y.numel()
+        total_tokens += y.numel()
+        total_samples += x.size(0)
+
+        # 更新进度条显示
+        cur_loss = total_loss / total_tokens
+        elapsed = time.perf_counter() - t_start
+        samples_s = total_samples / elapsed if elapsed > 0 else 0
+        pbar.set_postfix(loss=f"{cur_loss:.4f}", ppl=f"{math.exp(min(cur_loss, 20)):.2f}", samp_s=f"{samples_s:.0f}")
+
+    avg_loss = total_loss / total_tokens
+    # PPL（困惑度）= e^loss，越低越好
+    # 可以理解为：模型平均在多少个字里猜下一个字
+    # PPL=100意味着模型相当于在100个候选字里随机选
+    ppl      = math.exp(avg_loss)
+    return avg_loss, ppl
+
+
+# ─────────────────────────── 主函数 ───────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(description="字符级 Transformer 语言模型")
+    parser.add_argument("--epochs",      type=int,   default=20)
+    parser.add_argument("--seq_len",     type=int,   default=128)      # 每个训练样本的长度
+    parser.add_argument("--batch_size",  type=int,   default=256)      # 每次喂给模型的样本数
+    parser.add_argument("--embed_dim",   type=int,   default=128)      # 词向量维度
+    parser.add_argument("--num_heads",   type=int,   default=4,   help="多头注意力的头数")
+    parser.add_argument("--num_layers",  type=int,   default=2,   help="Transformer 层数")
+    parser.add_argument("--ff_size",     type=int,   default=512, help="前馈网络中间维度")
+    parser.add_argument("--dropout",     type=float, default=0.1)
+    parser.add_argument("--lr",          type=float, default=1e-3)     # 学习率，控制每步更新幅度
+    parser.add_argument("--val_ratio",   type=float, default=0.05)     # 5%数据用于验证
+    parser.add_argument("--corpus",      default="*.txt")
+    parser.add_argument("--save",        default="best_model.pt")
+    parser.add_argument("--num_workers", type=int,   default=0,   help="DataLoader 并行加载进程数")
+    args = parser.parse_args()
+
+    # 自动检测是否有GPU，有就用GPU，没有用CPU
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"device: {device}  model: Transformer  heads: {args.num_heads}  layers: {args.num_layers}")
+
+    # ── 数据准备 ──
+    text = load_corpus(args.corpus)
+    # 只取前1/5的文本，减少训练时间
+    text = text[:len(text) // 5]
+    if not text:
+        raise FileNotFoundError("未找到任何 .txt 文件，请确认路径正确。")
+    print(f"语料字符数: {len(text):,}")
+
+    char2idx, idx2char = build_vocab(text)
+    vocab_size = len(char2idx)
+    print(f"词表大小: {vocab_size}")
+
+    # 按行打散，95%训练，5%验证
+    # 按行分割而不是按字符，是为了不把一句话切断
+    lines = text.splitlines()
+    random.shuffle(lines)
+    split      = int(len(lines) * (1 - args.val_ratio))
+    train_text = "\n".join(lines[:split])
+    val_text   = "\n".join(lines[split:])
+
+    train_ds = CharDataset(train_text, char2idx, args.seq_len)
+    val_ds   = CharDataset(val_text,   char2idx, args.seq_len)
+
+    # DataLoader：自动把数据分成batch，shuffle=True每个epoch打乱顺序
+    # pin_memory=True：数据预先锁定在内存，GPU读取更快
+    # persistent_workers：保持worker进程存活，避免每个epoch重新启动
+    train_loader = DataLoader(
+        train_ds, batch_size=args.batch_size, shuffle=True,  drop_last=True,
+        num_workers=args.num_workers, pin_memory=True, persistent_workers=args.num_workers > 0,
+    )
+    val_loader = DataLoader(
+        val_ds,   batch_size=args.batch_size, shuffle=False, drop_last=True,
+        num_workers=args.num_workers, pin_memory=True, persistent_workers=args.num_workers > 0,
+    )
+
+    # ── 模型初始化 ──
+    model = TransformerLM(
+        vocab_size  = vocab_size,
+        embed_dim   = args.embed_dim,
+        num_heads   = args.num_heads,
+        num_layers  = args.num_layers,
+        ff_size     = args.ff_size,
+        dropout     = args.dropout,
+        max_len     = args.seq_len + 1,  # +1是因为位置编码需要比seq_len多一位
+    ).to(device)
+
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"模型参数量: {total_params:,}")
+
+    # CrossEntropyLoss：内部包含softmax+log+负号
+    # 等价于：-log(预测正确字的概率)，概率越高loss越低
+    criterion = nn.CrossEntropyLoss()
+
+    # Adam优化器：自适应学习率，比普通SGD收敛更快更稳
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+    best_val_ppl = float("inf")   # 记录最佳验证PPL，用于判断是否保存模型
+
+    print(f"\n{'Epoch':>6}  {'Train Loss':>10}  {'Train PPL':>10}  {'Val Loss':>10}  {'Val PPL':>10}")
+    print("-" * 56)
+
+    epoch_bar = tqdm(range(1, args.epochs + 1), desc="总进度", unit="epoch", dynamic_ncols=True)
+    for epoch in epoch_bar:
+        # 训练阶段：更新参数
+        tr_loss, tr_ppl = run_epoch(
+            model, train_loader, criterion, optimizer, device,
+            train=True, desc=f"Epoch {epoch}/{args.epochs} 训练",
+        )
+        # 验证阶段：不更新参数，只看效果
+        # torch.no_grad()：关闭梯度计算，节省显存和时间
+        with torch.no_grad():
+            va_loss, va_ppl = run_epoch(
+                model, val_loader, criterion, optimizer, device,
+                train=False, desc=f"Epoch {epoch}/{args.epochs} 验证",
+            )
+
+        # 如果验证PPL创新低，保存模型（*标记）
+        marker = "  *" if va_ppl < best_val_ppl else ""
+        if va_ppl < best_val_ppl:
+            best_val_ppl = va_ppl
+            # 保存模型权重+词表+训练参数，SFT阶段需要全部这些
+            torch.save({
+                "model_state": model.state_dict(),  # 所有层的权重
+                "char2idx":    char2idx,             # 字符→id映射
+                "idx2char":    idx2char,             # id→字符映射
+                "args":        vars(args),           # 训练参数（SFT要用来重建模型结构）
+            }, args.save)
+
+        tqdm.write(f"{epoch:>6}  {tr_loss:>10.4f}  {tr_ppl:>10.2f}  {va_loss:>10.4f}  {va_ppl:>10.2f}{marker}")
+        epoch_bar.set_postfix(best_ppl=f"{best_val_ppl:.2f}")
+
+    print(f"\n训练完成。最佳验证 PPL: {best_val_ppl:.2f}  已保存至 {args.save}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,42 @@
+2026-04-19 22:09:36.907 | DEBUG    | __main__:train:142 - 开始训练
+2026-04-19 22:09:37.055 | DEBUG    | __main__:train:152 - [epoch]:0 [loss]:2.26 [train_acc]:0.18 [valid_acc]:0.28
+2026-04-19 22:09:37.339 | DEBUG    | __main__:train:152 - [epoch]:20 [loss]:1.20 [train_acc]:0.77 [valid_acc]:0.72
+2026-04-19 22:09:37.612 | DEBUG    | __main__:train:152 - [epoch]:40 [loss]:0.91 [train_acc]:0.85 [valid_acc]:0.77
+2026-04-19 22:09:37.903 | DEBUG    | __main__:train:152 - [epoch]:60 [loss]:0.77 [train_acc]:0.87 [valid_acc]:0.80
+2026-04-19 22:09:38.195 | DEBUG    | __main__:train:152 - [epoch]:80 [loss]:0.69 [train_acc]:0.89 [valid_acc]:0.81
+2026-04-19 22:09:38.470 | DEBUG    | __main__:train:152 - [epoch]:100 [loss]:0.63 [train_acc]:0.90 [valid_acc]:0.82
+2026-04-19 22:09:38.746 | DEBUG    | __main__:train:152 - [epoch]:120 [loss]:0.58 [train_acc]:0.91 [valid_acc]:0.82
+2026-04-19 22:09:39.035 | DEBUG    | __main__:train:152 - [epoch]:140 [loss]:0.54 [train_acc]:0.91 [valid_acc]:0.83
+2026-04-19 22:09:39.332 | DEBUG    | __main__:train:152 - [epoch]:160 [loss]:0.52 [train_acc]:0.92 [valid_acc]:0.84
+2026-04-19 22:09:39.613 | DEBUG    | __main__:train:152 - [epoch]:180 [loss]:0.49 [train_acc]:0.92 [valid_acc]:0.85
+2026-04-19 22:09:39.899 | DEBUG    | __main__:train:152 - [epoch]:200 [loss]:0.47 [train_acc]:0.92 [valid_acc]:0.85
+2026-04-19 22:09:40.195 | DEBUG    | __main__:train:152 - [epoch]:220 [loss]:0.45 [train_acc]:0.93 [valid_acc]:0.85
+2026-04-19 22:09:40.513 | DEBUG    | __main__:train:152 - [epoch]:240 [loss]:0.43 [train_acc]:0.93 [valid_acc]:0.86
+2026-04-19 22:09:40.862 | DEBUG    | __main__:train:152 - [epoch]:260 [loss]:0.42 [train_acc]:0.93 [valid_acc]:0.86
+2026-04-19 22:09:41.168 | DEBUG    | __main__:train:152 - [epoch]:280 [loss]:0.41 [train_acc]:0.93 [valid_acc]:0.86
+2026-04-19 22:09:41.478 | DEBUG    | __main__:train:152 - [epoch]:300 [loss]:0.40 [train_acc]:0.94 [valid_acc]:0.86
+2026-04-19 22:09:41.748 | DEBUG    | __main__:train:152 - [epoch]:320 [loss]:0.38 [train_acc]:0.94 [valid_acc]:0.86
+2026-04-19 22:09:42.033 | DEBUG    | __main__:train:152 - [epoch]:340 [loss]:0.37 [train_acc]:0.94 [valid_acc]:0.87
+2026-04-19 22:09:42.360 | DEBUG    | __main__:train:152 - [epoch]:360 [loss]:0.37 [train_acc]:0.95 [valid_acc]:0.88
+2026-04-19 22:09:42.768 | DEBUG    | __main__:train:152 - [epoch]:380 [loss]:0.36 [train_acc]:0.95 [valid_acc]:0.88
+2026-04-19 22:09:43.062 | DEBUG    | __main__:train:152 - [epoch]:400 [loss]:0.35 [train_acc]:0.95 [valid_acc]:0.89
+2026-04-19 22:09:43.348 | DEBUG    | __main__:train:152 - [epoch]:420 [loss]:0.34 [train_acc]:0.95 [valid_acc]:0.89
+2026-04-19 22:09:43.652 | DEBUG    | __main__:train:152 - [epoch]:440 [loss]:0.34 [train_acc]:0.95 [valid_acc]:0.89
+2026-04-19 22:09:43.941 | DEBUG    | __main__:train:152 - [epoch]:460 [loss]:0.33 [train_acc]:0.95 [valid_acc]:0.89
+2026-04-19 22:09:44.218 | DEBUG    | __main__:train:152 - [epoch]:480 [loss]:0.32 [train_acc]:0.95 [valid_acc]:0.89
+2026-04-19 22:09:44.502 | DEBUG    | __main__:train:155 - 训练结束
+2026-04-19 22:09:44.502 | DEBUG    | __main__:test:173 - 开始评估
+2026-04-19 22:09:44.507 | DEBUG    | __main__:_get_perclass_acc:96 - [总样本数]:200
+2026-04-19 22:09:44.507 | DEBUG    | __main__:_get_perclass_acc:101 - [类别]: 0 [样本数]:17 [预测正确数]:15 [准确率]: 0.88
+2026-04-19 22:09:44.507 | DEBUG    | __main__:_get_perclass_acc:101 - [类别]: 1 [样本数]:16 [预测正确数]:16 [准确率]: 1.00
+2026-04-19 22:09:44.507 | DEBUG    | __main__:_get_perclass_acc:101 - [类别]: 2 [样本数]:24 [预测正确数]:24 [准确率]: 1.00
+2026-04-19 22:09:44.507 | DEBUG    | __main__:_get_perclass_acc:101 - [类别]: 3 [样本数]:28 [预测正确数]:26 [准确率]: 0.93
+2026-04-19 22:09:44.508 | DEBUG    | __main__:_get_perclass_acc:101 - [类别]: 4 [样本数]:14 [预测正确数]:13 [准确率]: 0.93
+2026-04-19 22:09:44.508 | DEBUG    | __main__:_get_perclass_acc:101 - [类别]: 5 [样本数]:20 [预测正确数]:18 [准确率]: 0.90
+2026-04-19 22:09:44.508 | DEBUG    | __main__:_get_perclass_acc:101 - [类别]: 6 [样本数]:19 [预测正确数]:17 [准确率]: 0.89
+2026-04-19 22:09:44.508 | DEBUG    | __main__:_get_perclass_acc:101 - [类别]: 7 [样本数]:19 [预测正确数]:19 [准确率]: 1.00
+2026-04-19 22:09:44.509 | DEBUG    | __main__:_get_perclass_acc:101 - [类别]: 8 [样本数]:20 [预测正确数]:19 [准确率]: 0.95
+2026-04-19 22:09:44.509 | DEBUG    | __main__:_get_perclass_acc:101 - [类别]: 9 [样本数]:23 [预测正确数]:21 [准确率]: 0.91
+2026-04-19 22:09:44.509 | DEBUG    | __main__:_get_perclass_acc:102 - [平均准确率]:0.94
+2026-04-19 22:09:44.509 | DEBUG    | __main__:test:176 - 评估结束
+2026-04-19 22:09:44.509 | DEBUG    | __main__:save_model:112 - 保存模型:d:\codes\python code\bdai-nlp-study\蒋慧凯\week2\find_max_index.py.bin

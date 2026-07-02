@@ -1,0 +1,12 @@
+# Week 8 文本匹配作业依赖
+# 注意：torch 需要安装 CUDA 版本，例如：
+#   uv pip install torch --index-url https://download.pytorch.org/whl/cu121
+#   或 pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+torch>=2.0,<2.13
+transformers>=4.30
+scikit-learn
+matplotlib
+tqdm
+numpy
+peft>=0.4

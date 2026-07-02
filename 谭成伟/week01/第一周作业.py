@@ -1,0 +1,4 @@
+已在本地电脑D盘中安装了miniconda3，并且在其中创建了一个虚拟环境py312，在该虚拟环境中安装了文档中的Numpy，Torch这些库。
+也在Pycharm编辑器中切换了py312虚拟环境测试引入库Numpy，Torch可以正常使用。
+下面是本地电脑安装好的虚拟环境路径：
+D:\program\miniconda3\envs\py312

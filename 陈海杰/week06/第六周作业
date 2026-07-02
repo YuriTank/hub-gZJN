@@ -1,0 +1,38 @@
+
+使用设备: cpu
+DataLoader 构建完成
+  train: 1281 条, 21 batch
+  val  : 752 条, 12 batch
+  test : 175 条, 3 batch
+模型参数量: 102.3M  (BERT: 102.3M, 分类头: 11.5K)
+池化策略: cls
+Checkpoint 加载成功：C:\py3.12\text_classification项目\outputs\checkpoints\best_cls.pt
+  训练 epoch=2, val_acc=0.5213
+
+分类报告：
+              precision    recall  f1-score   support
+
+          故事       0.25      0.33      0.29        15
+          文化       0.54      0.59      0.56        68
+          娱乐       0.49      0.61      0.55        59
+          体育       0.79      0.70      0.75        44
+          财经       0.39      0.32      0.35        65
+          房产       0.71      0.42      0.53        36
+          汽车       0.77      0.67      0.71        60
+          教育       0.52      0.53      0.53        45
+          科技       0.33      0.53      0.41        73
+          军事       0.53      0.37      0.43        54
+          旅游       0.48      0.51      0.50        51
+          国际       0.52      0.57      0.55        79
+          证券       0.00      0.00      0.00         3
+          农业       0.64      0.47      0.54        49
+          电竞       0.66      0.53      0.59        51
+
+    accuracy                           0.52       752
+   macro avg       0.51      0.48      0.48       752
+weighted avg       0.54      0.52      0.52       752
+
+
+val accuracy : 0.5213
+val macro F1 : 0.4850
+混淆矩阵已保存 → C:\py3.12\text_classification项目\outputs\figures\confusion_matrix_cls.png

@@ -1,0 +1,399 @@
+"""
+SFT（监督微调）脚本
+在 week5.py 预训练模型的基础上，用指令数据做对话微调。
+
+用法:
+    # 第一步：先跑预训练（week5.py），生成 pretrain.pt
+    python week5.py --epochs 20 --save pretrain.pt
+
+    # 第二步：下载数据集（只需跑一次）
+    python week5_sft.py --download_only
+
+    # 第三步：SFT 微调
+    python week5_sft.py --pretrain pretrain.pt --epochs 5
+
+    # 第四步：对话测试
+    python week5_sft.py --chat --sft_model sft_model.pt
+"""
+
+import math
+import json
+import argparse
+import random
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+from pathlib import Path
+
+
+# ─────────────────────────── 复用 week5 的模型结构 ───────────────────────────
+# 直接把 week5.py 里的模型类粘贴过来，保持结构一致才能加载权重
+
+class MultiHeadSelfAttention(nn.Module):
+    def __init__(self, hidden_size, num_heads):
+        super().__init__()
+        assert hidden_size % num_heads == 0
+        self.num_heads = num_heads
+        self.head_dim  = hidden_size // num_heads
+        self.q_linear  = nn.Linear(hidden_size, hidden_size)
+        self.k_linear  = nn.Linear(hidden_size, hidden_size)
+        self.v_linear  = nn.Linear(hidden_size, hidden_size)
+        self.out_proj  = nn.Linear(hidden_size, hidden_size)
+
+    def forward(self, x, mask=None):
+        B, T, H = x.shape
+        Q = self.q_linear(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        K = self.k_linear(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        V = self.v_linear(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, float("-inf"))
+        attn_weights = torch.softmax(scores, dim=-1)
+        out = torch.matmul(attn_weights, V)
+        out = out.transpose(1, 2).contiguous().view(B, T, H)
+        return self.out_proj(out)
+
+
+class TransformerLayer(nn.Module):
+    def __init__(self, hidden_size, num_heads, ff_size, dropout):
+        super().__init__()
+        self.attention = MultiHeadSelfAttention(hidden_size, num_heads)
+        self.norm1 = nn.LayerNorm(hidden_size)
+        self.norm2 = nn.LayerNorm(hidden_size)
+        self.ffn   = nn.Sequential(
+            nn.Linear(hidden_size, ff_size),
+            nn.GELU(),
+            nn.Linear(ff_size, hidden_size),
+        )
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x, mask=None):
+        x = self.norm1(x + self.drop(self.attention(x, mask)))
+        x = self.norm2(x + self.drop(self.ffn(x)))
+        return x
+
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, hidden_size, max_len=1024, dropout=0.1):
+        super().__init__()
+        self.drop = nn.Dropout(dropout)
+        pe  = torch.zeros(max_len, hidden_size)
+        pos = torch.arange(0, max_len).unsqueeze(1).float()
+        div = torch.exp(torch.arange(0, hidden_size, 2).float() * (-math.log(10000.0) / hidden_size))
+        pe[:, 0::2] = torch.sin(pos * div)
+        pe[:, 1::2] = torch.cos(pos * div)
+        self.register_buffer("pe", pe.unsqueeze(0))
+
+    def forward(self, x):
+        return self.drop(x + self.pe[:, :x.size(1)])
+
+
+class TransformerLM(nn.Module):
+    def __init__(self, vocab_size, embed_dim, num_heads, num_layers, ff_size, dropout, max_len=1024):
+        super().__init__()
+        self.embed   = nn.Embedding(vocab_size, embed_dim)
+        self.pos_enc = PositionalEncoding(embed_dim, max_len, dropout)
+        self.layers  = nn.ModuleList([
+            TransformerLayer(embed_dim, num_heads, ff_size, dropout)
+            for _ in range(num_layers)
+        ])
+        self.drop = nn.Dropout(dropout)
+        self.fc   = nn.Linear(embed_dim, vocab_size)
+
+    def forward(self, x):
+        B, T = x.shape
+        mask = torch.tril(torch.ones(T, T, device=x.device)).unsqueeze(0).unsqueeze(0)
+        h = self.pos_enc(self.embed(x))
+        for layer in self.layers:
+            h = layer(h, mask)
+        return self.fc(h)
+
+
+# ─────────────────────────── SFT 数据集 ───────────────────────────
+
+PROMPT_TEMPLATE = "### 指令：\n{instruction}\n### 回答：\n"
+# 格式：把 instruction 和 output 拼在一起
+# 训练时只对 output 部分计算 loss，instruction 部分用 -100 屏蔽
+
+
+class SFTDataset(Dataset):
+    """
+    读取 alpaca 格式的 JSON 数据：
+    [{"instruction": "...", "input": "...", "output": "..."}, ...]
+    将每条数据转成：[PROMPT][OUTPUT]，只对 OUTPUT 部分算 loss
+    """
+
+    def __init__(self, data, char2idx, seq_len):
+        self.seq_len  = seq_len
+        self.char2idx = char2idx
+        self.samples  = []
+        self._build(data)
+
+    def _encode(self, text):
+        return [self.char2idx[c] for c in text if c in self.char2idx]
+
+    def _build(self, data):
+        for item in data:
+            instruction = item.get("instruction", "")
+            inp         = item.get("input", "")
+            output      = item.get("output", "")
+
+            # 有 input 就拼进去
+            if inp.strip():
+                instruction = instruction + "\n" + inp
+
+            prompt     = PROMPT_TEMPLATE.format(instruction=instruction)
+            prompt_ids = self._encode(prompt)
+            output_ids = self._encode(output)
+
+            # 拼成完整序列
+            full_ids = prompt_ids + output_ids
+            if len(full_ids) < 4:
+                continue
+
+            # 截断到 seq_len + 1
+            full_ids = full_ids[: self.seq_len + 1]
+
+            # label：prompt 部分用 -100 屏蔽，只算 output 的 loss
+            labels = [-100] * len(prompt_ids) + output_ids
+            labels = labels[: self.seq_len + 1]
+
+            # x = full_ids[:-1], y = labels[1:]
+            x = full_ids[:-1]
+            y = labels[1:]
+
+            # 补齐到 seq_len
+            pad_len = self.seq_len - len(x)
+            x = x + [0] * pad_len
+            y = y + [-100] * pad_len
+
+            self.samples.append((
+                torch.tensor(x, dtype=torch.long),
+                torch.tensor(y, dtype=torch.long),
+            ))
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        return self.samples[idx]
+
+
+# ─────────────────────────── 数据下载 ───────────────────────────
+
+def download_data(save_path="alpaca_gpt4_zh.json"):
+    """从 HuggingFace 下载 alpaca_gpt4_zh 数据集并保存为本地 JSON。"""
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        print("请先安装: pip install datasets")
+        return
+
+    print("正在下载 alpaca_gpt4_zh 数据集...")
+    ds = load_dataset("silk-road/alpaca-data-gpt4-chinese", split="train")
+    data = [{"instruction": x["instruction"],
+             "input":       x.get("input", ""),
+             "output":      x["output"]} for x in ds]
+
+    with open(save_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    print(f"已保存 {len(data)} 条数据至 {save_path}")
+
+
+# ─────────────────────────── 训练 ───────────────────────────
+
+def sft_epoch(model, loader, optimizer, device, train=True):
+    model.train(train)
+    total_loss   = 0.0
+    total_tokens = 0
+
+    criterion = nn.CrossEntropyLoss(ignore_index=-100)  # 屏蔽 -100 的 prompt 部分
+
+    for x, y in loader:
+        x, y   = x.to(device), y.to(device)
+        logits = model(x)                                # (B, T, V)
+        loss   = criterion(logits.reshape(-1, logits.size(-1)), y.reshape(-1))
+
+        if train:
+            optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+
+        # 只统计非 -100 的 token 数量
+        valid_tokens  = (y != -100).sum().item()
+        total_loss   += loss.item() * valid_tokens
+        total_tokens += valid_tokens
+
+    avg_loss = total_loss / max(total_tokens, 1)
+    ppl      = math.exp(min(avg_loss, 20))  # 防止 exp 溢出
+    return avg_loss, ppl
+
+
+# ─────────────────────────── 对话推理 ───────────────────────────
+
+@torch.no_grad()
+def generate(model, char2idx, idx2char, instruction, max_new=200, temperature=0.8, device="cpu"):
+    model.eval()
+    prompt = PROMPT_TEMPLATE.format(instruction=instruction)
+    prompt_ids = [char2idx[c] for c in prompt if c in char2idx]
+    ids        = list(prompt_ids)
+    prompt_len = len(prompt_ids)   # 编码后的长度，而非字符串长度
+
+    # 模型位置编码的最大长度，超出会越界
+    max_ctx = model.pos_enc.pe.size(1)
+
+    for _ in range(max_new):
+        x      = torch.tensor([ids[-max_ctx:]], dtype=torch.long, device=device)
+        logits = model(x)                        # (1, T, V)
+        logits = logits[0, -1] / temperature
+
+        if len(ids) > 10:
+            recent = ids[-20:]
+            for prev_id in set(recent):
+                logits[prev_id] -= 1.5  # 出现过的字扣1.5分
+
+        logits = logits / temperature
+        # 取最后一个 token 的 logits
+        probs  = torch.softmax(logits, dim=-1)
+        next_id = torch.multinomial(probs, 1).item()
+        ids.append(next_id)
+
+        # 遇到换行两次视为结束（简单启发式）
+        generated = "".join(idx2char.get(i, "") for i in ids[prompt_len:])
+        if generated.endswith("\n\n"):
+            break
+
+    return "".join(idx2char.get(i, "") for i in ids[prompt_len:])
+
+
+# ─────────────────────────── 主函数 ───────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(description="SFT 微调脚本")
+    parser.add_argument("--pretrain",     default="best_model.pt",   help="预训练模型路径")
+    parser.add_argument("--data",         default="alpaca_gpt4_zh.json", help="SFT 数据路径")
+    parser.add_argument("--sft_model",    default="sft_model.pt",  help="SFT 模型保存路径")
+    parser.add_argument("--epochs",       type=int,   default=20)
+    parser.add_argument("--seq_len",      type=int,   default=128)
+    parser.add_argument("--batch_size",   type=int,   default=64)
+    parser.add_argument("--lr",           type=float, default=3e-4)
+    parser.add_argument("--val_ratio",    type=float, default=0.05)
+    parser.add_argument("--download_only",action="store_true", help="只下载数据，不训练")
+    parser.add_argument("--chat",         action="store_true", help="对话模式")
+    args = parser.parse_args()
+
+    # 只下载数据
+    if args.download_only:
+        download_data(args.data)
+        return
+
+    # 对话模式
+    if args.chat:
+        ckpt     = torch.load(args.sft_model, map_location="cpu")
+        char2idx = ckpt["char2idx"]
+        idx2char = ckpt["idx2char"]
+        cfg      = ckpt["args"]
+        device   = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model    = TransformerLM(
+            vocab_size  = len(char2idx),
+            embed_dim   = cfg["embed_dim"],
+            num_heads   = cfg["num_heads"],
+            num_layers  = cfg["num_layers"],
+            ff_size     = cfg["ff_size"],
+            dropout     = 0.0,
+            max_len     = cfg["seq_len"] + 1,
+        ).to(device)
+        model.load_state_dict(ckpt["model_state"])
+        print("模型已加载，输入 q 退出\n")
+        while True:
+            user = input("你：").strip()
+            if user.lower() in ("q", "quit", "exit"):
+                break
+            reply = generate(model, char2idx, idx2char, user, device=device)
+            print(f"模型：{reply}\n")
+        return
+
+    # ── 训练流程 ──
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"device: {device}")
+
+    # 1. 加载预训练模型
+    if not Path(args.pretrain).exists():
+        raise FileNotFoundError(f"找不到预训练模型 {args.pretrain}，请先运行 week5.py")
+
+    print(f"加载预训练模型: {args.pretrain}")
+    ckpt     = torch.load(args.pretrain, map_location=device)
+    char2idx = ckpt["char2idx"]
+    idx2char = ckpt["idx2char"]
+    cfg      = ckpt["args"]
+
+    # SFT 的 seq_len 不能超过预训练时的值
+    # 因为位置编码 pe 的大小在预训练时已经固定，超出会报 RuntimeError
+    if args.seq_len > cfg["seq_len"]:
+        print(f"警告：SFT seq_len={args.seq_len} 超过预训练 seq_len={cfg['seq_len']}，已自动截断")
+        args.seq_len = cfg["seq_len"]
+
+    model = TransformerLM(
+        vocab_size  = len(char2idx),
+        embed_dim   = cfg["embed_dim"],
+        num_heads   = cfg["num_heads"],
+        num_layers  = cfg["num_layers"],
+        ff_size     = cfg["ff_size"],
+        dropout     = cfg["dropout"],
+        max_len     = cfg["seq_len"] + 1,   # 必须与预训练时一致，否则 pos_enc.pe 形状不匹配
+    ).to(device)
+    model.load_state_dict(ckpt["model_state"])
+    print(f"预训练权重加载成功，词表大小: {len(char2idx)}")
+
+    # 2. 加载 SFT 数据
+    if not Path(args.data).exists():
+        print(f"找不到数据文件 {args.data}，正在自动下载...")
+        download_data(args.data)
+
+    with open(args.data, encoding="utf-8") as f:
+        all_data = json.load(f)
+
+    random.shuffle(all_data)
+    split     = int(len(all_data) * (1 - args.val_ratio))
+    train_data = all_data[:split]
+    val_data   = all_data[split:]
+    print(f"训练集: {len(train_data)} 条  验证集: {len(val_data)} 条")
+
+    train_ds = SFTDataset(train_data, char2idx, args.seq_len)
+    val_ds   = SFTDataset(val_data,   char2idx, args.seq_len)
+    print(f"有效训练样本: {len(train_ds)}  有效验证样本: {len(val_ds)}")
+
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,  drop_last=True)
+    val_loader   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False, drop_last=False)
+
+    # 3. 训练
+    optimizer    = torch.optim.Adam(model.parameters(), lr=args.lr)
+    best_val_ppl = float("inf")
+
+    print(f"\n{'Epoch':>6}  {'Train Loss':>10}  {'Train PPL':>10}  {'Val Loss':>10}  {'Val PPL':>10}")
+    print("-" * 56)
+
+    for epoch in range(1, args.epochs + 1):
+        tr_loss, tr_ppl = sft_epoch(model, train_loader, optimizer, device, train=True)
+        with torch.no_grad():
+            va_loss, va_ppl = sft_epoch(model, val_loader, optimizer, device, train=False)
+
+        marker = "  *" if va_ppl < best_val_ppl else ""
+        if va_ppl < best_val_ppl:
+            best_val_ppl = va_ppl
+            torch.save({
+                "model_state": model.state_dict(),
+                "char2idx":    char2idx,
+                "idx2char":    idx2char,
+                "args":        cfg,
+            }, args.sft_model)
+
+        print(f"{epoch:>6}  {tr_loss:>10.4f}  {tr_ppl:>10.2f}  {va_loss:>10.4f}  {va_ppl:>10.2f}{marker}")
+
+    print(f"\nSFT 完成。最佳验证 PPL: {best_val_ppl:.2f}  已保存至 {args.sft_model}")
+    print(f"\n对话测试：python week5_sft.py --chat --sft_model {args.sft_model}")
+
+
+if __name__ == "__main__":
+    main()

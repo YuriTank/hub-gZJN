@@ -1,0 +1,103 @@
+'''
+作业：用Pytorch实现一个transformer层
+'''
+
+import torch
+import torch.nn as nn #导入torch和torch.nn模块
+import torch.nn.functional as F #导入torch.nn.functional模块，提供了很多常用的函数，如激活函数、损失函数等
+
+# ==========================
+# 1. 实现多头自注意力
+# ==========================
+class MultiHeadAttention(nn.Module):   #定义一个多头自注意力类，继承nn.Module，nn.Module是所有神经网络模块的基类，提供了很多便利的方法和属性
+    def __init__(self, embed_dim, num_heads):   #初始化函数，提前定义好所有需要的层、参数、变量。输入参数：嵌入维度和头数
+        super().__init__()   #让定义的类继承 nn.Module 的所有功能，必须要写！
+        self.embed_dim = embed_dim   #在类里存东西：保存嵌入维度
+        self.num_heads = num_heads   #保存头数
+        self.head_dim = embed_dim // num_heads   #计算每个头的维度
+
+        # Q K V 线性层
+        self.w_q = nn.Linear(embed_dim, embed_dim)   #定义线性层，用于生成查询向量Q，输入维度和输出维度都是嵌入维度（768）
+        self.w_k = nn.Linear(embed_dim, embed_dim)   #定义线性层，用于生成键向量K，输入维度和输出维度都是嵌入维度（768）
+        self.w_v = nn.Linear(embed_dim, embed_dim)   #定义线性层，用于生成值向量V，输入维度和输出维度都是嵌入维度（768）
+
+        # 输出线性层
+        self.out = nn.Linear(embed_dim, embed_dim)   #定义线性层，用于输出结果（拼接后的变量进行线性变换、整合信息。Wo）
+
+    def forward(self, x):   #前向传播函数，输入参数：x是输入张量，形状为[batch_size, seq_len, embed_dim]
+        batch_size, seq_len, _ = x.shape   #获取输入的批次大小、序列长度和嵌入维度（_表示不使用这个变量）
+
+        # 线性映射得到 Q K V
+        Q = self.w_q(x)   #通过线性层生成查询向量Q
+        K = self.w_k(x)   #通过线性层生成键向量K
+        V = self.w_v(x)   #通过线性层生成值向量V
+
+        # 分成多头: [B, len, heads, head_dim]   .view (...) 把向量切分成多个头，.transpose(...) 调整维度顺序，-1表示自动计算维度大小
+        Q = Q.view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)   #将Q分成多头，调整形状为[B, heads, len, head_dim]
+        K = K.view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)   #将K分成多头，调整形状为[B, heads, len, head_dim]
+        V = V.view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)   #将V分成多头，调整形状为[B, heads, len, head_dim]
+
+        # 缩放点积注意力：torch.matmul(...) 计算矩阵乘法，K.transpose(-2, -1) 将K的最后两个维度交换，torch.sqrt(...) 计算缩放因子
+        score = torch.matmul(Q, K.transpose(-2, -1)) / torch.sqrt(torch.tensor(self.head_dim, dtype=torch.float32))   #计算注意力得分，使用缩放点积公式
+        attn = F.softmax(score, dim=-1)   #对得分按行进行softmax归一化，得到注意力权重
+
+        # 加权 V
+        out = torch.matmul(attn, V)   #使用注意力权重加权值向量V
+
+        # 拼接多头
+        out = out.transpose(1, 2).contiguous().view(batch_size, -1, self.embed_dim)   #将多头的输出拼接起来，调整形状为[B, len, embed_dim]
+
+        # 最后线性层
+        return self.out(out)   #通过最后的线性层输出结果
+
+# ==========================
+# 2. 实现前馈网络 FFN：两个线性层，第1个线性层（加激活函数）升维，第2个线性层降维回原来的嵌入维度
+# ==========================
+class FeedForward(nn.Module):
+    def __init__(self, embed_dim, hidden_dim):    # hidden_dim 通常是嵌入维度的4倍，这里是768*4=3072(升维)
+        super().__init__()
+        self.fc1 = nn.Linear(embed_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, embed_dim)
+
+    def forward(self, x):
+        return self.fc2(F.gelu(self.fc1(x)))  # 用F.gelu作为激活函数，先通过fc1升维，再通过fc2降维回原来的嵌入维度（768）(用nn.gelu的话必须先在init定义 self.gelu = nn.GELU()，然后在forward里调用 self.gelu(self.fc1(x))，这里直接用F.gelu更简洁一些)
+
+# ==========================
+# 3. 实现一个 Transformer Encoder Layer，将上面两部分组合起来，并添加残差连接和 LayerNorm
+# ==========================
+class TransformerEncoderLayer(nn.Module):
+    def __init__(self, embed_dim, num_heads, hidden_dim):
+        super().__init__()
+        self.attn = MultiHeadAttention(embed_dim, num_heads)  # 这句的意思是创建一个多头自注意力层，输入参数是嵌入维度和头数，实例化后保存在self.attn属性中，可以在前向传播中调用这个层来计算注意力输出
+        self.ffn = FeedForward(embed_dim, hidden_dim)  # 这句话的意思是创建一个前馈网络层，输入参数是嵌入维度和隐藏层维度，实例化后保存在self.ffn属性中，可以在前向传播中调用这个层来计算前馈网络的输出
+
+        # 两个 LayerNorm
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.norm2 = nn.LayerNorm(embed_dim)
+
+    def forward(self, x):
+        # 自注意力 + 残差 + norm
+        x = self.norm1(x + self.attn(x))
+        
+        # 前馈 + 残差 + norm
+        x = self.norm2(x + self.ffn(x))
+        return x
+
+# ==========================
+# 测试（作业必须写）
+# ==========================
+if __name__ == "__main__":
+    embed_dim = 768
+    num_heads = 12
+    hidden_dim = 3072 # 通常是嵌入维度的4倍，这里是768*4=3072
+
+    # 构造一层
+    layer = TransformerEncoderLayer(embed_dim, num_heads, hidden_dim)
+
+    # 构造输入：[batch=2, seq_len=10, embed=768]
+    x = torch.randn(2, 10, embed_dim)  # 生成一个随机输入张量，形状为[2, 10, 768]，表示批次大小为2，序列长度为10，嵌入维度为768
+
+    # 前向传播
+    out = layer(x)
+    print("输入形状:", x.shape)
+    print("输出形状:", out.shape)

@@ -1,0 +1,27 @@
+数据集: bq_corpus
+损失函数: cosine
+模型: BiEncoder (pool=mean, layers=1)
+参数量: 24.3M  (BERT 骨干: 24.3M)
+总训练步数: 2155  Warmup 步数: 215
+Epoch 1/1 | train_loss=0.2571 | val_acc=0.7600 val_f1=0.7599 threshold=0.64 | 1418s
+训练完成。最优 val_f1=0.7599
+
+数据集: bq_corpus
+损失函数: triplet
+模型: BiEncoder (pool=mean, layers=1)
+参数量: 24.3M  (BERT 骨干: 24.3M)
+总训练步数: 1077  Warmup 步数: 107
+Epoch 1/1 | train_loss=0.1511 | val_acc=0.7526 val_f1=0.7524 threshold=0.45 | 510s
+训练完成。最优 val_f1=0.7524
+
+设备: cpu
+BERT 层数: 1  Epochs: 1  Batch size: 32
+DataLoader 构建中...
+  train :  68,960 条,  2155 batch
+  val   :   8,620 条,   270 batch
+  test  :   8,620 条,   270 batch
+Epoch 1/1 [CrossEncoder]:   0%|          | 0/2155 [00:00<?, ?it/s]模型: CrossEncoder (layers=1)
+参数量: 24.3M  (BERT 骨干: 24.3M)
+总训练步数: 215  Warmup 步数: 21
+Epoch 1/1 | train_loss=0.6843 train_acc=0.5501 | val_acc=0.5891 val_f1=0.5891 | 682s
+训练完成。最优 val_f1=0.5891

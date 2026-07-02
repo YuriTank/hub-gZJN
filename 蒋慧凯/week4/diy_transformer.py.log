@@ -1,0 +1,2 @@
+2026-05-14 05:03:34.921 | DEBUG    | __main__:<module>:185 - 手动实现原始Transformer输出形状:torch.Size([100, 512, 768])
+2026-05-14 05:03:51.500 | DEBUG    | __main__:<module>:194 - 手动实现BERT层Transformer输出形状:torch.Size([100, 512, 768])
